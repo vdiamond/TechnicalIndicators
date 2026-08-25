@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="../TALib/TALib.csproj" />
+  <Project Path="ta_console.csproj" />
+</Solution>

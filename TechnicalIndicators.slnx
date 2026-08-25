@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="TALib.Tests/TALib.Tests.csproj" />
+  <Project Path="TALib/TALib.csproj" />
+</Solution>
