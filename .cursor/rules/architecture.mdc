@@ -1,13 +1,21 @@
+---
+description: TALib structure, series contracts, pooling, and indicator design rules
+alwaysApply: true
+---
+
 # TALib Architecture
 
 **Purpose**  
 This document describes the high-level architecture of **TALib** (Technical Analysis Library) and the rules that keep it consistent, performant, and maintainable.
 
 **Audience**  
-Human developers and AI agents working on the library. Read this together with `AGENTS.md` and `coding-standards.md` before changing code.
+Human developers and AI agents working on the library. Read this together with `AGENTS.md` and `.cursor/rules/coding-standards.mdc` before changing code.
 
 **Scope**  
-Applies to the `TALib` class library and any consumers that compose its APIs (for example `ta_console`). Legacy patterns should be brought into compliance when touched.
+Applies to the `TALib` class library and any consumer that composes its APIs. `ta_console` does not reference `TALib` yet. Legacy patterns should be brought into compliance when touched.
+
+**Compliance**  
+Existing `TALib` code does not yet follow every rule in `.cursor/rules/coding-standards.mdc` (single-statement blocks without braces, broad `Exception` throws, member order). Bring touched code into compliance with that file. Indicator names and the series contracts in this document stay as they are until Victor approves a breaking change.
 
 ---
 
@@ -36,24 +44,32 @@ Non-goals:
 
 ```
 TechnicalIndicators/
-├── TALib/                 # Core library (class library, net8.0+)
-│   ├── ListUtil.cs        # Infrastructure: pooling, slicing, list helpers
-│   ├── Common.cs          # Shared constants / converters
-│   ├── Basic.cs           # Element-wise math and unary transforms
-│   ├── Overlays.cs        # Moving averages, support/resistance overlays
-│   ├── Oscillators.cs     # Momentum, volatility, multi-series oscillators
-│   ├── Conditions.cs      # Boolean filters and generic pointwise calc
+├── TALib/                     # Class library, net8.0. No NuGet packages.
+│   ├── ListUtil.cs            # ListPool, Slicer, ListExtention
+│   ├── Common.cs              # VolatilityConverter
+│   ├── Basic.cs               # Element-wise math and unary transforms
+│   ├── Overlays.cs            # sma, ema, offset, rpt, spt
+│   ├── Oscillators.cs         # Momentum, volatility, multi-series oscillators
+│   ├── Conditions.cs          # Boolean filters and generic pointwise calc
+│   ├── Levels.cs              # Levels<T> bucketed level map
+│   ├── PriceLevels.cs         # Stateful turning-point tracker
 │   └── TALib.csproj
-├── ta_console/            # Optional host / scratch consumer
-└── .grok/rules/           # Agent and team standards (this file lives here)
+├── TALib.Tests/               # xUnit, net8.0. ProjectReference to TALib.
+├── ta_console/                # net10.0 Hello-World. No reference to TALib.
+├── TechnicalIndicators.slnx   # TALib + TALib.Tests only
+├── AGENTS.md
+└── .cursor/rules/             # coding-standards.mdc, this file
 ```
+
+`ta_console/ta_console.slnx` lists `TALib` and `ta_console`. `ta_console.csproj` has no `ProjectReference`, and `Program.Main` only writes `Hello, World!`.
 
 ### Project roles
 
-| Project       | Role                                                                 |
-|---------------|----------------------------------------------------------------------|
-| **TALib**     | Pure computational library. No console entry point. No I/O.          |
-| **ta_console**| Thin executable host for experiments, demos, or manual verification. |
+| Project | Role |
+|---------|------|
+| **TALib** | Computational library. No console entry point. No I/O. Targets `net8.0`. |
+| **TALib.Tests** | xUnit tests for public indicator behavior. Targets `net8.0`. |
+| **ta_console** | Hello-World placeholder. Targets `net10.0`. Does not reference `TALib`. |
 
 **Rule:** Put all reusable indicator and series logic in `TALib`. Keep host-specific code out of the library.
 
@@ -61,7 +77,7 @@ TechnicalIndicators/
 
 ## 3. Architectural Style
 
-TALib is a **static functional core** over **mutable list buffers**, not a service-oriented or OOP domain model.
+Indicator math in TALib is a **static functional core** over **mutable list buffers**, not a service-oriented or OOP domain model. `Levels<T>` and `PriceLevels` are the stateful exceptions: they store level maps and turning-point windows, and they are not series functions with a `ret` buffer.
 
 | Characteristic              | Approach in TALib                                      |
 |----------------------------|--------------------------------------------------------|
@@ -83,12 +99,13 @@ Dependencies flow **downward only**. Higher layers may call lower layers; revers
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Consumers (ta_console, strategies, apps)                   │
+│  Consumers (strategies, apps)                               │
 └────────────────────────────┬────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────┐
 │  Indicator / Domain APIs                                    │
 │  Overlays · Oscillators · Conditions · Basic                │
+│  Levels · PriceLevels                                       │
 └────────────────────────────┬────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────┐
@@ -97,6 +114,8 @@ Dependencies flow **downward only**. Higher layers may call lower layers; revers
 │  Shared helpers / constants (e.g. VolatilityConverter)      │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+`ta_console` is not a consumer yet.
 
 ### 4.1 Infrastructure layer (`ListUtil.cs`, parts of `Common.cs`)
 
@@ -115,7 +134,7 @@ Rules:
 
 ### 4.2 Domain API layer
 
-Organized by **indicator family**, each in its own static class file:
+Organized by **indicator family**, each in its own file. `Basic`, `Overlays`, `Oscillators`, and `Conditions` are static. `Levels<T>` and `PriceLevels` are stateful types:
 
 | Class          | Responsibility                                                                 |
 |----------------|--------------------------------------------------------------------------------|
@@ -123,8 +142,10 @@ Organized by **indicator family**, each in its own static class file:
 | `Overlays`     | Price overlays and smoothers (`sma`, `ema`, `offset`, `rpt`, `spt`)            |
 | `Oscillators`  | Momentum / volatility / multi-input indicators (`roc`, `macd`, `wilders_rsi`, …) |
 | `Conditions`   | Boolean series, filters, and generic pointwise `Calc`                           |
+| `Levels<T>`    | Bucketed map from a price to a struct (`Set`, `Get`, neighbors)                 |
+| `PriceLevels`  | Logs OHLC bars and records turning points into `Levels<LevelData>`              |
 
-Each domain file also hosts matching members of the **`partial` class `ListDoubleExtensions`** (or related extension surface) so callers can write fluent pipelines.
+`Basic`, `Overlays`, `Oscillators`, and `Conditions` also host matching members of the **`partial` class `ListDoubleExtensions`** so callers can write fluent pipelines. `Levels` and `PriceLevels` do not.
 
 Rules:
 
@@ -267,6 +288,8 @@ When adding a new function, place it as follows:
 | Boolean predicates, filters, generic pointwise maps   | `Conditions`      |
 | Pooling, slicing, list shape utilities                | `ListUtil`        |
 | Shared pure constants / converters                    | `Common`          |
+| Bucketed price-level map (`Levels<T>`)                | `Levels`          |
+| Stateful bar / turning-point tracking                 | `PriceLevels`     |
 
 **Rules:**
 
@@ -427,8 +450,8 @@ Current library style uses **short, formula-oriented names** (`sma`, `ema`, `roc
 
 When changing indicator math or infrastructure:
 
-1. Build successfully (`dotnet build`) with no new warnings when possible.
-2. Run existing tests (`dotnet test`) if/when a test project is present.
+1. Build with `dotnet build TechnicalIndicators.slnx`. The library currently emits nullable warnings (`ret = null` on non-nullable parameters) and 0 errors. Do not add new warnings.
+2. Run `dotnet test TechnicalIndicators.slnx`. `TALib.Tests` is an xUnit project and is part of that solution.
 3. Prefer tests named `MethodName_StateUnderTest_ExpectedBehavior`.
 4. Cover at least:
    - Happy path known values (hand-calculated or golden fixtures)
@@ -495,17 +518,17 @@ Do not pursue these at the cost of a silent break to existing callers.
 
 ## 14. Relationship to Other Rule Files
 
-| File                   | Concern                                      |
-|------------------------|----------------------------------------------|
-| `AGENTS.md`            | Agent workflow, stack, when to ask           |
-| `coding-standards.md`  | C# style, member ordering, language features |
-| `architecture.md`      | Library structure, TA patterns, perf rules   |
+| File | Concern |
+|------|---------|
+| `AGENTS.md` | Repo layout, commands, dependencies, what not to touch |
+| `.cursor/rules/coding-standards.mdc` | C# style, member ordering, language features |
+| `.cursor/rules/architecture.mdc` | Library structure, TA patterns, perf rules |
 
 When rules appear to conflict, apply this priority:
 
 1. **Correctness & robustness** of numerical results and contracts  
 2. **This architecture’s public series contracts** (signatures, pooling, warm-up)  
-3. **coding-standards.md** for general C# style  
+3. **`.cursor/rules/coding-standards.mdc`** for general C# style  
 4. **Performance** when justified by measurement  
 
 For TALib-specific naming and dual static/extension APIs, **this document wins** over generic style preferences until a deliberate migration is approved.
