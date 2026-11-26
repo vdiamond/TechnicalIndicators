@@ -40,3 +40,7 @@ Pass an optional `ret` buffer to reuse output lists in tight loops. Intermediate
 - `Basic` — element-wise math
 - `Conditions` — boolean filters and pointwise maps
 - `ListUtil` — pooling and slicing helpers
+
+## License
+
+MIT. See [LICENSE](LICENSE).
