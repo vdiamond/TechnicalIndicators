@@ -53,3 +53,7 @@ Pass an optional `ret` buffer to reuse output lists in tight loops. Intermediate
 - `Levels` / `PriceLevels` — bucketed price levels and turning-point tracking
 - `Common` — volatility annualization factors
 - `ListUtil` — pooling and slicing helpers
+
+## License
+
+MIT. See [LICENSE](LICENSE).
